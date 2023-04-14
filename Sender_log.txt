@@ -1,0 +1,19 @@
+snd  0           SYN  61426   0     
+snd  3021.14     SYN  61426   0     
+rcv  4031.12     ACK  61427   0     
+snd  4031.79     DATA 61427   1000  
+snd  4042.77     DATA 62427   1000  
+snd  4053.99     DATA 63427   1000  
+rcv  5037.79     ACK  62427   0     
+snd  5038.13     DATA 64427   1000  
+rcv  6041.76     ACK  63427   0     
+snd  6042.08     DATA 65427   1000  
+rcv  7064.68     ACK  64427   0     
+snd  7065.19     DATA 891     1000  
+rcv  8067.36     ACK  65427   0     
+snd  8067.79     DATA 1891    700   
+rcv  9086.64     ACK  891     0     
+retrans snd  12120.52    DATA 65427   1000  
+rcv  13122.74    ACK  891     0     
+retrans snd  16175.42    DATA 65427   1000  
+rcv  17216.52    ACK  891     0     
