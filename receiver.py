@@ -33,8 +33,7 @@ seg_type_to_name = {
 }
 
 class Receiver:
-    # def __init__(self, receiver_port: int, sender_port: int, filename: str, flp: float, rlp: float) -> None:
-    def __init__(self, receiver_port = 10002, sender_port = 10001, filename = 'asyoulik_rev.txt', flp = 0.2, rlp = 0.2) -> None:
+    def __init__(self, receiver_port: int, sender_port: int, filename: str, flp: float, rlp: float) -> None:
         '''
         The server will be able to receive the file from the sender via UDP
         :param receiver_port: the UDP port number to be used by the receiver to receive PTP segments from the sender.
@@ -54,8 +53,8 @@ class Receiver:
         self.want_seq = 0
         self.data_start_seq = -1
         self.max_win = 1<<14  # 16k
-        self.flp = flp
-        self.rlp = rlp
+        self.flp = float(flp)
+        self.rlp = float(rlp)
         self.t_start = 0
         self.state = State.NONE
 
@@ -83,16 +82,18 @@ class Receiver:
                 incoming_message, sender_address = self.receiver_socket.recvfrom(BUFFERSIZE)
             except:
                 continue
-            if len(incoming_message) == 4:  # SYN FIN RESET
+            if len(incoming_message) == 4:
+                # SYN FIN RESET segment
                 type, seq = struct.unpack('HH', incoming_message)
                 # forward segment loss
                 if random.random() <= self.flp:
-                    if self.t_start == 0:  # SYN loss
+                    if self.t_start == 0:
+                        # SYN loss
                         self.t_start = get_current_time()
                         t_inv = 0
                     else:
                         t_inv = round(get_current_time() - self.t_start, 2)
-                    self.logger.info(f'drp  {t_inv:<10}  {seg_type_to_name[type]}  {seq:<6}  {0:<6}')
+                    self.logger.info(f'drp  {t_inv:<10}  {seg_type_to_name[type]}  {seq:<6}  0')
                     continue
                 if type == Type.SYN.value:
                     self.client_address = sender_address
@@ -101,7 +102,7 @@ class Receiver:
                         t_inv = 0
                     else:
                         t_inv = round(get_current_time() - self.t_start, 2)
-                    self.logger.info(f'rev  {t_inv:<10}  SYN  {seq:<6}  {0:<6}')
+                    self.logger.info(f'rev  {t_inv:<10}  SYN  {seq:<6}  0')
                     print (f"client{sender_address} send syn message, seq: {seq}")
                     self.data_start_seq = seq + 1
                     self.want_seq = seq + 1
@@ -110,8 +111,9 @@ class Receiver:
                 
                 if type == Type.FIN.value:
                     t_inv = round(get_current_time() - self.t_start, 2)
-                    self.logger.info(f'rev  {t_inv:<10}  FIN  {seq:<6}  {0:<6}')
+                    self.logger.info(f'rev  {t_inv:<10}  FIN  {seq:<6}  0')
                     print (f"client{sender_address} send fin message, seq: {seq}")
+                    # write received data to file
                     self.write_file()
                     self.want_seq = seq + 1
                     self.reply_ack(self.want_seq)
@@ -122,18 +124,20 @@ class Receiver:
                     
                 if type == Type.RESET.value:
                     t_inv = round(get_current_time() - self.t_start, 2)
-                    self.logger.info(f'rev  {t_inv:<10}  RST  {seq:<6}  {0:<6}')
+                    self.logger.info(f'rev  {t_inv:<10}  RST  {seq:<6}  0')
                     self.state = State.END
-            else:  # data loss
+            else:
+                # data segment
                 type, seq = struct.unpack('HH', incoming_message[0:4])
                 data = incoming_message[4:]
+                # data loss
                 if random.random() <= self.flp:
                     t_inv = round(get_current_time() - self.t_start, 2)
-                    self.logger.info(f'drp  {t_inv:<10}  {seg_type_to_name[type]} {seq:<6}  {len(data):<6}')
+                    self.logger.info(f'drp  {t_inv:<10}  {seg_type_to_name[type]} {seq:<6}  {len(data)}')
                     continue
                 if type == Type.DATA.value:
                     t_inv = round(get_current_time() - self.t_start, 2)
-                    self.logger.info(f'rev  {t_inv:<10}  DATA {seq:<6}  {len(data):<6}')
+                    self.logger.info(f'rev  {t_inv:<10}  DATA {seq:<6}  {len(data)}')
                     self.seq_data[seq] = data
                     
                     if self.want_seq == seq:
@@ -149,13 +153,13 @@ class Receiver:
         # reverse segment loss 
         if random.random() <= self.rlp:
             t_inv = round(get_current_time() - self.t_start, 2)
-            self.logger.info(f'drp  {t_inv:<10}  ACK  {seq:<6}  {0:<6}')
+            self.logger.info(f'drp  {t_inv:<10}  ACK  {seq:<6}  0')
             return
         ack_seg = build_segment_header(Type.ACK, seq)
         self.receiver_socket.sendto(ack_seg, self.client_address)
         
         t_inv = round(get_current_time() - self.t_start, 2)
-        self.logger.info(f'snd  {t_inv:<10}  ACK  {self.want_seq:<6}  {0:<6}')
+        self.logger.info(f'snd  {t_inv:<10}  ACK  {self.want_seq:<6}  0')
         
     def write_file(self):
         with open(self.store_file, "w+") as file:
@@ -181,10 +185,10 @@ if __name__ == '__main__':
         format='%(asctime)s,%(msecs)03d %(levelname)-8s %(message)s',
         datefmt='%Y-%m-%d:%H:%M:%S')
 
-    #if len(sys.argv) != 6:
-    #    print(
-    #        "\n===== Error usage, python3 receiver.py receiver_port sender_port FileReceived.txt flp rlp ======\n")
-    #    exit(0)
+    if len(sys.argv) != 6:
+        print(
+            "\n===== Error usage, python3 receiver.py receiver_port sender_port FileReceived.txt flp rlp ======\n")
+        exit(0)
 
     receiver = Receiver(*sys.argv[1:])
     receiver.run()

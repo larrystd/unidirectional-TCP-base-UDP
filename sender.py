@@ -25,8 +25,7 @@ BUFFERSIZE = 1024
 
 
 class Sender:
-    # def __init__(self, sender_port: int, receiver_port: int, filename: str, max_win: int, rot: int) -> None:
-    def __init__(self, sender_port = 10001, receiver_port= 10002, filename= 'asyoulik.txt', max_win= 3000, rot= 300) -> None:
+    def __init__(self, sender_port: int, receiver_port: int, filename: str, max_win: int, rot: int) -> None:
         '''
         The Sender will be able to connect the Receiver via UDP
         :param sender_port: the UDP port number to be used by the sender to send PTP segments to the receiver
@@ -40,12 +39,12 @@ class Sender:
         self.sender_address = ("127.0.0.1", self.sender_port)
         self.receiver_address = ("127.0.0.1", self.receiver_port)
         self.state = State.NONE
-        self.rot = rot
+        self.rot = int(rot)
         self.bufsize = 1024
         self.max_data_size = 1000
         self.file_path = filename
         self.file_size = -1
-        self.max_win = max_win
+        self.max_win = int(max_win)
         self.send_seg_list = []  # send seg list
         self.send_time_list = []  # every segment's sending time list
         self.win_size = -1  # current slide window size
@@ -91,19 +90,20 @@ class Sender:
                 t_inv = round(get_current_time() - self.t_start, 2)
                 self.sender_socket.sendto(syn_seg, self.receiver_address)
                 if trans_syn_times == 1:
-                    self.logger.info(f'snd  {0:<10}  SYN  {self.init_seq:<6}  {0:<6}')
+                    self.logger.info(f'snd  {0:<10}  SYN  {self.init_seq:<6}  0')
                 else:
-                    self.logger.info(f'snd  {t_inv:<10}  SYN  {self.init_seq:<6}  {0:<6}')
-                self.cond.wait()  # wait for ack result
-                
-                if self.state == State.READ_FILE:  # connect success
+                    self.logger.info(f'snd  {t_inv:<10}  SYN  {self.init_seq:<6}  0')
+                # wait for ack result
+                self.cond.wait()  
+                # connect success
+                if self.state == State.READ_FILE:  
                     break
                 # send RESET
                 if trans_syn_times == 3:
                     rst_seg = build_segment_header(Type.RESET, 0)
                     t_inv = round(get_current_time() - self.t_start, 2)
                     self.sender_socket.sendto(rst_seg, self.receiver_address)
-                    self.logger.info(f'snd  {t_inv:<10}  RST  {0:<6}  {0:<6}')
+                    self.logger.info(f'snd  {t_inv:<10}  RST  {0:<6}  0')
                     self.state = State.END
                     self._is_active = False
                     return
@@ -117,8 +117,9 @@ class Sender:
             if self.state == State.CONNECT:
                 self.reply_connect()
             elif self.state == State.READ_FILE:
+                # wait for DATA_TRANS state
                 with self.cond:
-                    self.cond.wait()  # wait for data transfer
+                    self.cond.wait()
             elif self.state == State.DATA_TRANS:
                 self.reply_data_trans()
             elif self.state == State.CLOSE:
@@ -129,34 +130,39 @@ class Sender:
             try:
                 ack_seg, _ = self.sender_socket.recvfrom(self.bufsize)
             except:
+                # notify main-thread to resend syn
                 with self.cond:
-                    self.cond.notify_all()  # notify main-thread to resend syn
+                    self.cond.notify_all()
             else:
                 type, seq = struct.unpack('HH', ack_seg)
                 assert type == Type.ACK.value
                 t_inv = round(get_current_time() - self.t_start, 2)
-                self.logger.info(f'rcv  {t_inv:<10}  ACK  {seq:<6}  {len(ack_seg)-4:<6}')
+                self.logger.info(f'rcv  {t_inv:<10}  ACK  {seq:<6}  {len(ack_seg)-4}')
                 self.data_seq = seq
+                # notify main-thread to read file and send data
                 with self.cond:
                     self.state = State.READ_FILE
-                    self.cond.notify_all()  # notify main-thread to read file and send data
+                    self.cond.notify_all()
         
     def reply_close(self):
         while self.state == State.CLOSE:
             try:
                 ack_seg, _ = self.sender_socket.recvfrom(self.bufsize)
             except:
+                # notify main-thread to resend fin
                 with self.cond:
-                    self.cond.notify_all()  # notify main-thread to resend fin
+                    self.cond.notify_all()
             else:
                 type, seq = struct.unpack('HH', ack_seg)
                 assert type == Type.ACK.value
                 t_inv = round(get_current_time() - self.t_start, 2)
-                self.logger.info(f'rcv  {t_inv:<10}  ACK  {seq:<6}  {len(ack_seg)-4:<6}')
+                self.logger.info(f'rcv  {t_inv:<10}  ACK  {seq:<6}  {len(ack_seg)-4}')
                 with self.cond:
                     self.state = State.END
-                    self._is_active = False  # finish sub-thread
-                    self.cond.notifyAll()  # notify main-thread
+                    # finish sub-thread
+                    self._is_active = False
+                    # notify main-thread
+                    self.cond.notifyAll()  
     
     def reply_data_trans(self):
         may_retrans_seq = (self.init_seq + 1) % (1<<16)
@@ -166,7 +172,7 @@ class Sender:
             try:
                 ack_seg, addr = self.sender_socket.recvfrom(self.bufsize)
             except:
-                # out of time, retrans the latter segment
+                # out of time, retrans the oldest unackowledgment segment
                 seq_id = self.data_seq_to_id[may_retrans_seq]
                 with self.cond:
                     self.retransmiss_id_list.append(seq_id)
@@ -175,7 +181,7 @@ class Sender:
                 # receive ack seg in time
                 type, seq = struct.unpack('HH', ack_seg)
                 t_inv = round(get_current_time() - self.t_start, 2)
-                self.logger.info(f'rcv  {t_inv:<10}  ACK  {seq:<6}  {len(ack_seg)-4:<6}')
+                self.logger.info(f'rcv  {t_inv:<10}  ACK  {seq:<6}  {len(ack_seg)-4}')
                 # end data_trans
                 if seq == self.data_seq:  
                     with self.cond:
@@ -195,13 +201,15 @@ class Sender:
                         self.win_size -= ack_size
                         for id in self.retransmiss_id_list:
                             if self.data_id_to_seq[id] < seq:
-                                self.retransmiss_id_list.remove(id)  # move unneeded retransmiss segment
+                                # move unneeded retransmiss segment
+                                self.retransmiss_id_list.remove(id)
                             if seq < self.init_seq and self.data_id_to_seq[id] > self.init_seq:
                                 self.retransmiss_id_list.remove(id)
                         self.cond.notifyAll()
                 elif seq == may_retrans_seq:
                     redundancy_times += 1
-                if redundancy_times == 3:  # three redundany ack
+                # three redundany ack
+                if redundancy_times == 3:  
                     with self.cond:
                         self.retransmiss_id_list.append(self.data_seq_to_id[seq])
                         self.cond.notifyAll()
@@ -225,7 +233,7 @@ class Sender:
                 self.sender_socket.sendto(seg, self.receiver_address)
                 
                 t_inv = round(get_current_time() - self.t_start, 2)
-                self.logger.info(f'snd  {t_inv:<10}  DATA {self.data_id_to_seq[retrans_id]:<6}  {len(seg)-4:<6}')
+                self.logger.info(f'snd  {t_inv:<10}  DATA {self.data_id_to_seq[retrans_id]:<6}  {len(seg)-4}')
                 self.retransmiss_id_list.remove(retrans_id)
                 
             if send_id < len(self.send_seg_list):  # send segment
@@ -278,15 +286,15 @@ class Sender:
         file.close()
         
     def close(self):
-        self.cond.acquire()
-        while self.state != State.CLOSE:
-            self.cond.wait()
+        with self.cond:
+            while self.state != State.CLOSE:
+                self.cond.wait()
         self.fin_seq = self.data_seq
         fin_seg = build_segment_header(Type.FIN, self.fin_seq)
         while self.state == State.CLOSE:
             self.sender_socket.sendto(fin_seg, self.receiver_address)
             t_inv = round(get_current_time() - self.t_start, 2)
-            self.logger.info(f'snd  {t_inv:<10}  FIN  {self.fin_seq:<6}  {0:<6}')
+            self.logger.info(f'snd  {t_inv:<10}  FIN  {self.fin_seq:<6}  0')
             
             with self.cond:
                 self.cond.wait()
@@ -312,10 +320,10 @@ if __name__ == '__main__':
         format='%(asctime)s,%(msecs)03d %(levelname)-8s %(message)s',
         datefmt='%Y-%m-%d:%H:%M:%S')
     
-    #if len(sys.argv) != 6:
-    #    print(
-    #        "\n===== Error usage, python3 sender.py sender_port receiver_port FileReceived.txt max_win rot ======\n")
-    #    exit(0)
+    if len(sys.argv) != 6:
+        print(
+            "\n===== Error usage, python3 sender.py sender_port receiver_port FileReceived.txt max_win rot ======\n")
+        exit(0)
 
     sender = Sender(*sys.argv[1:])
     sender.run()
